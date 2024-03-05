@@ -1,0 +1,834 @@
+---
+title: "Unveiling Socio Demographic Patterns: Happiness Levels in North America and ANZ Region"
+author: "Fibry"
+date: "`r format(Sys.Date(), '%B %e, %Y')`"
+output: 
+  rmdformats::downcute:
+    toc_depth: 3
+    toc_float: 
+        collapsed: True
+    highlight: kate
+    default_style: dark
+    css : costum.css
+    
+---
+
+Are you happy? How are other people? And were they happier in the past? These questions are very difficult to answer due to the uncertainty of the definition of "happiness". However, "The World Happiness Report" generates an annual report regarding global happiness and life satisfaction. The score is based on the pooled results from the Gallup World Poll, which surveys more than 160 countries. The survey itself asks: "On which step ladder do you imagine your life is?" The highest and lowest possible levels of satisfaction are 10 and 0, respectively. This life satisfaction scale is called the "Cantril Ladder" method. The score incorporates several factors: economic production, social support, life expectancy, freedom, absence of corruption, and generosity. These factors do not affect the total score assigned to each country, but they do describe why some countries rank higher than others.
+
+In this project, we will analyze the happiness levels across various countries in the North America and ANZ region by leveraging socio-demographic data available in the World Happiness Report. Our analysis will be conducted using the `plm()` function in R, which allows for panel data analysis. Through this analysis, we aim to gain insights into the socio-economic dynamics and their impact on the well-being of individuals in North America and ANZ. 
+
+# Project Expectation
+
+This project, as part of Learn by Building (LBB), focuses on applying knowledge related to exploring panel data using the `plm()` function in R. The sequence of the process include: 
+
+- Library Preparation
+- Importing Data
+- Data Preparation
+- Exploratory Data Analysis
+- Summary of Data
+- Modeling
+- Conclusion and Recommendations
+
+# Libraries Preparation
+
+Below is the list of libraries used in this project. 
+
+```{r, warning=FALSE,message=FALSE}
+#Packages for processing the dataframe
+library(dplyr)
+library(tidyr)
+library(lubridate)
+
+#Packages for visualization
+library(ggcorrplot)
+library(gplots)
+library(ggplot2)
+library(plotly)
+library(foreign)
+
+
+#Packages for analyzing
+library(plm)
+library(lfe)
+library(lmtest)
+library(car)
+library(tseries)
+library(MLmetrics)
+library(inspectdf)
+```
+
+
+# Importing Data
+
+These datasets were created by ["The World Happiness Report"](https://worldhappiness.report). However, the datasets is collected in csv format from the Algoritma Database
+
+First, read raw dataset from the working directory and assign them as variables called `data`. Then, observe the data by applying `glimpse()`.
+
+
+```{r}
+# Read the dataframe
+data <- read.csv("data_input/World_Happiness_Report.csv")
+
+# Check the dataframe
+glimpse(data)
+```
+
+We found that the `data` has 2199 rows and 13 columns. The variables or factors in the dataset include:
+
+- **Life.Ladder**: An indicator of life satisfaction, ranging from 0 to 10.
+- **Log.GDP.Per.Capita**: A measure representing a country's standard of living, describing how much citizens benefit from their country's economy.
+- **Healthy.Life.Expectancy.At.Birth**: The average number of years of healthy life for the population.
+- **Social.Support**: The national average of binary responses (either 0 or 1) to the question of whether a person has someone to count on in times of trouble.
+- **Freedom.To.Make.Life.Choices**: The national average of responses to the question of whether individuals are happy with the freedom they have to choose what they want to do in their life.
+- **Generosity**: The residual of regressing the national average response to the GWP question "Have you donated money to a charity in the past month?" on GDP per capita.
+- **Perceptions.Of.Corruption**: The national average of survey responses to two questions in the GWP: "Is corruption widespread throughout the government or not?" and "Is corruption widespread within businesses or not?" The overall perception is the average of the two 0-or-1 responses.
+- **Positive.Affect** : Average size of the effect the day before for laughter, pleasure, and interest.
+- **Negative.Affect** :  Average size of the effect the day before for worries, sadness, and anger.
+- **Confidence.In.National.Goverment** :  How much trust in the government.
+
+For detailed information, please refer to this [link](https://happiness-report.s3.amazonaws.com/2021/Appendix1WHR2021C2.pdf)." 
+
+
+# Data Preparation
+
+## Select Region
+
+The objective for this section entails specific data manipulation tasks. 
+
+1. **Observe the Distinct Values in Regional.Indicator:**
+   - Identify the unique categories within the `Regional.Indicator` variable to understand the diversity of regions in the dataset.
+   
+2. **Filter the Database for Only North America and ANZ Region:**
+   - Extract data related to countries categorized under the North America and ANZ region to focus the analysis specifically on this geographical area.
+   
+3. **Drop Column Regional.Indicator:**
+   - Remove the `Regional Indicator` column from the dataset as it's no longer needed after filtering for North America and ANZ.
+
+
+```{r}
+# Check the distinct value for the Regional.Indicator 
+unique(data$Regional.Indicator)
+```
+
+As seen above, there are 11 distinct values in the **Regional.Indicator** column. Since we want to focus solely on the North America and ANZ region, we need to filter the dataframe using the `filter()` function.
+
+```{r}
+
+# Filter the dataset only for North America and ANZ region and drop the Regional.Indicator column
+data <- data %>% 
+  filter(Regional.Indicator == "North America and ANZ") %>% 
+  select(-c(Regional.Indicator))
+
+# Check the dataframe
+glimpse(data)
+```
+
+Insight:
+
+- Our dataset consists of 66 rows and 12 columns.
+- There are 4 countries in the North America and ANZ region.
+
+## Check Data Balance
+
+Now, we will use two methods to check the data balance.
+
+**1. Observe data frequency by indexing each individual using the `table()` function.** 
+
+
+```{r}
+table(data$Country.Name)
+```
+
+**2. Using `p_balanced()` function**
+
+Since our dataframe is not yet converted to a **pdata.frame**, we will add the parameter `index("individual index", "time index")`. We expect to have a value of `TRUE` if the dataframe is balanced.
+
+```{r}
+is.pbalanced(data , index  = c("Country.Name", "Year"))
+```
+
+Insights:
+
+1. **Data Frame Balance**:
+   - The data frame is not balanced, suggesting that some countries may have more data points or observations compared to others.
+
+2. **Information Availability among North America and ANZ Countries**:
+   - Canada and the United States have the highest amount of available information among the North America and ANZ countries.
+   - Conversely, New Zealand and Australia have the lowest amount of available information compared to the other countries.
+   - Based on this result, we will retain all the countries.
+
+
+## Data Structure Adjustment
+
+**1. Create a panel dataframe**
+
+Before balancing, we need to create a **pdata.frame** using `pdata.frame()` with the following parameters:
+
+- `data`: The dataset to be used.
+- `index`: `c("individual index", "time index")`
+
+
+```{r}
+#Filter dataframe and hange datatype of Country.Name and Year as factor
+data <- data %>% 
+  filter(Country.Name %in% c( "Australia", "Canada", "New Zealand", "United States" )) %>% 
+  mutate(Country.Name = as.factor(Country.Name)) %>% 
+  mutate(Year= as.factor(Year))
+
+# Change to pdata.frame
+data <- data %>% 
+  pdata.frame(index = c("Country.Name","Year"))
+
+#Check structure of data
+glimpse(data)
+
+```
+
+
+Insight : 
+
+Based on the provided information, it seems that the data types of most columns have been automatically changed to  `pseries`, except for the index columns  `Country.Name` and  `Year`, which changed to factor. 
+
+
+**2. Check Data Dimension**
+
+We can use `pdim()` to check our  `pdata.frame` dimension
+
+```{r}
+
+pdim(data)
+```
+
+Insight:
+
+- The number of data points is currently not balanced.
+- There are data from 4 countries.
+- The time index ranges from 16 to 17.
+- The total number of observations is 66.
+
+## Balancing Data
+
+Now, we will balance the data using `make.pbalanced` with the parameter `balance.type`.
+
+**1. `fill`: Any missing values in the time columns will be filled with NA.**
+
+```{r}
+
+balance1 <- data %>% 
+  make.pbalanced(balance.type = "fill")
+
+table(balance1$Country.Name)
+unique(balance1$Year)
+```
+
+**2. `shared.times`: This option will select all individuals with the condition that time information is available for all individuals.**
+
+```{r}
+
+balance2 <- data %>% 
+  make.pbalanced(balance.type = "shared.times")
+
+table(balance2$Country.Name)
+unique(balance2$Year)
+```
+
+**3.`shared.individuals`: This option will select individuals with complete time information.**
+
+```{r}
+
+balance3 <-  data %>% 
+  make.pbalanced(balance.type = "shared.individuals")
+
+table(balance3$Country.Name)
+unique(balance3$Year)
+```
+
+Insight : 
+
+Based on the result, we will use the `fill` option since it offers the possibility to achieve the most optimal balancing. We will save the balanced data in an object called `balance1`.
+
+```{r}
+# Check the balance of the data
+is.pbalanced(balance1)
+```
+
+```{r}
+# Check the dimension of the data
+pdim(balance1)
+
+```
+
+Insight : 
+
+The `balance1` dataset consists of 4 countries, with a total of 72 observations, and the time index information includes 18 time points.
+
+## Check Missing Value
+
+```{r}
+colSums(is.na(balance1)) - colSums(is.na(data))
+```
+
+Insight : 
+
+Based on the result above, after conducting the balancing process, 6 rows with NA values were added in each column. The next step involves checking the completeness of the balancing result to ensure that the data is properly aligned and no important information has been lost during the balancing process.
+
+
+```{r}
+colSums(is.na(balance1))
+```
+
+Insight:
+
+Based on the provided information, the column **Confident.In.National.Government**  has a high number of missing values compared to other columns, approximately 1/7 of the total entries. Therefore, it is suggested to drop this column as it may not provide meaningful information due to the large proportion of missing data.
+
+```{r}
+# Drop the column
+balance1 <- balance1 %>% 
+  select(-c(Confidence.In.National.Government))
+```
+
+## Handling missing values
+
+To address missing values in other columns, filling them up will be done using interpolation for each country. Interpolation can help in estimating missing values based on existing data points, which can improve the completeness of the dataset while preserving the overall trend or pattern within each country's data.
+
+**1. Australia**
+
+```{r}
+# Check the number of missing values for each country
+aus <- balance1 %>% 
+  filter(Country.Name == "Australia")
+
+colSums(is.na(aus))
+```
+
+```{r}
+# Fill the missing values
+aus <- aus %>% mutate(
+  Life.Ladder = na.fill(Life.Ladder, fill = "extend"), 
+  Log.GDP.Per.Capita =  na.fill(Log.GDP.Per.Capita, fill = "extend"),
+  Social.Support = na.fill(Social.Support, fill = "extend"),
+  Healthy.Life.Expectancy.At.Birth = na.fill(Healthy.Life.Expectancy.At.Birth, fill = "extend"),
+  Freedom.To.Make.Life.Choices = na.fill(Freedom.To.Make.Life.Choices, fill = "extend"), 
+  Perceptions.Of.Corruption = na.fill(Perceptions.Of.Corruption, fill = "extend"), 
+  Positive.Affect = na.fill(Positive.Affect, fill = "extend"),
+  Generosity = na.fill(Generosity, fill = "extend"),
+  Negative.Affect = na.fill(Negative.Affect, fill = "extend"))
+  
+anyNA(aus)
+```
+
+
+**2. Canada**
+
+```{r}
+# Check the number of missing values for each country
+can <- balance1 %>% 
+  filter(Country.Name == "Canada")
+
+colSums(is.na(can))
+```
+
+```{r}
+# Fill the missing values
+can <- can %>% mutate(
+  Life.Ladder = na.fill(Life.Ladder, fill = "extend"), 
+  Log.GDP.Per.Capita =  na.fill(Log.GDP.Per.Capita, fill = "extend"),
+  Social.Support = na.fill(Social.Support, fill = "extend"),
+  Healthy.Life.Expectancy.At.Birth = na.fill(Healthy.Life.Expectancy.At.Birth, fill = "extend"),
+  Freedom.To.Make.Life.Choices = na.fill(Freedom.To.Make.Life.Choices, fill = "extend"), 
+  Perceptions.Of.Corruption = na.fill(Perceptions.Of.Corruption, fill = "extend"), 
+  Positive.Affect = na.fill(Positive.Affect, fill = "extend"),
+   Generosity = na.fill(Generosity, fill = "extend"),
+  Negative.Affect = na.fill(Negative.Affect, fill = "extend"))
+  
+anyNA(can)
+```
+
+
+**3. New Zealand**
+
+```{r}
+# Check the number of missing values for each country
+new <- balance1 %>% 
+  filter(Country.Name == "New Zealand")
+
+colSums(is.na(new))
+```
+
+```{r}
+# Fill the missing values
+new <- new %>% mutate(
+  Life.Ladder = na.fill(Life.Ladder, fill = "extend"), 
+  Log.GDP.Per.Capita =  na.fill(Log.GDP.Per.Capita, fill = "extend"),
+  Social.Support = na.fill(Social.Support, fill = "extend"),
+  Healthy.Life.Expectancy.At.Birth = na.fill(Healthy.Life.Expectancy.At.Birth, fill = "extend"),
+  Freedom.To.Make.Life.Choices = na.fill(Freedom.To.Make.Life.Choices, fill = "extend"), 
+  Perceptions.Of.Corruption = na.fill(Perceptions.Of.Corruption, fill = "extend"), 
+  Positive.Affect = na.fill(Positive.Affect, fill = "extend"),
+  Generosity = na.fill(Generosity, fill = "extend"),
+  Negative.Affect = na.fill(Negative.Affect, fill = "extend"))
+  
+anyNA(new)
+```
+
+**4. United States**
+
+```{r}
+# Check the number of missing values for each country
+uni <- balance1 %>% 
+  filter(Country.Name == "United States")
+
+colSums(is.na(uni))
+```
+
+```{r}
+# Fill the missing values
+uni <- uni %>% mutate(
+  Life.Ladder = na.fill(Life.Ladder, fill = "extend"), 
+  Log.GDP.Per.Capita =  na.fill(Log.GDP.Per.Capita, fill = "extend"),
+  Social.Support = na.fill(Social.Support, fill = "extend"),
+  Healthy.Life.Expectancy.At.Birth = na.fill(Healthy.Life.Expectancy.At.Birth, fill = "extend"),
+  Freedom.To.Make.Life.Choices = na.fill(Freedom.To.Make.Life.Choices, fill = "extend"), 
+  Perceptions.Of.Corruption = na.fill(Perceptions.Of.Corruption, fill = "extend"), 
+  Positive.Affect = na.fill(Positive.Affect, fill = "extend"),
+  Generosity = na.fill(Generosity, fill = "extend"),
+  Negative.Affect = na.fill(Negative.Affect, fill = "extend"))
+  
+anyNA(uni)
+```
+
+
+
+
+After filling in all the missing values in each country, we will now merge the data and save it in the object called "balanced2" using the `bind_rows` function.
+
+## Merge the Data
+
+```{r}
+# Merge data
+balanced2 <- bind_rows(aus, can, new, uni) 
+```
+
+```{r}
+# Check structure data
+glimpse(balanced2)
+```
+
+Now, we are ready to move the next step which is exploratory data analysis 
+
+# Exploratory Data Analysis
+
+# Summary Data
+
+```{r}
+summary(balanced2)
+```
+
+
+```{r}
+inspect_num(balanced2) %>% 
+  show_plot()
+```
+Insights:
+
+- The highest level of happiness observed in several countries in  North America and ANZ is 7.650.
+- The lowest level of happiness observed in several countries in North America and ANZ is 6.693.
+- Variable`Freedom.To.Make.Life.Choices` has left-skew because most of the values are distributed on higher end of the scale. 
+
+## Relationship between variable 
+
+To explore the relationships between predictor variables and the target variable (happiness), we can utilize the `ggcorrplot` function. This function allows us to visualize correlations between variables, helping us understand how different factors may be related to happiness levels in North America and ANZ countries.
+
+
+```{r}
+balanced2 %>%  
+  select (-Country.Name, -Year) %>% 
+  cor() %>% 
+  ggcorrplot(type = "lower", lab = TRUE)
+```
+
+Insight : 
+
+- There is strong positive relationship between `Life.Ladder` and `Social.Support`, `Freedom.To.Make.Life.Choices`, `Generosity` and `Positive.Affect`
+- There is strong negative relationship between `Life.Ladder` and `Log.GDP.Per.Capita`. 
+
+- There are indications of multicollinearity between:
+  - `Log.GDP.Per.Capita` and `Perception.Of.Curroption`
+
+
+Multicollinearity suggests that these variables may be highly correlated with each other, which can affect the reliability of regression analysis results. 
+
+## Exploration of Socio-demographic Factors
+
+To observe information from our data, we will use the `coplot()` function with the following parameters:
+
+- `formula`: The formula specifying the target variable in relation to the two indices.
+- `type`: Set to `"l"` for line plots and `"b"` for point and line plots.
+- `data`: The dataset to be used for analysis.
+- `rows`: The number of rows in the panel plot.
+- `col`: The color of the plot.
+
+**1. Life.ladder**
+
+```{r}
+coplot(Life.Ladder ~ Year|Country.Name,
+       type = "b", 
+       data= balanced2,
+       rows = 1,
+       col = "blue")
+```
+
+Insight : 
+
+- The Life Ladder across all countries has shown a declining trend in recent years, with a significant drop occurring from 2020 to 2022 in most countries.
+- This declining trend is particularly notable in Canada and the United States.
+- Specifically, the Life Ladder trend in the United States reached its lowest level in 2022. Conversely, the highest level of Life Ladder was observed in Canada in 2010.
+
+**2. Log.GDP.Per.Capita**
+
+```{r}
+# Your Code Here
+coplot(Log.GDP.Per.Capita ~ Year|Country.Name,
+       type = "b", 
+       data= balanced2,
+       rows = 1,
+       col = "blue")
+```
+
+Insight:
+
+- Overall, the GDP trend over the past years shows an increase among the countries. It is observed that in 2020, the GDP in all countries dropped but continued to increase in the following years.
+- The GDP in the United States reached its highest point in 2022 and has consistently been above the average GDP.
+- New Zealand has the lowest GDP compared to other countries, while Australia and Canada exhibit relatively similar patterns of GDP trends.
+
+**3. Perceptions.Of.Corruption**
+
+```{r}
+# Perceptions.Of.Corruption
+coplot(Perceptions.Of.Corruption ~ Year|Country.Name,
+       type = "b", 
+       data= balanced2,
+       rows = 1,
+       col = "blue")
+```
+
+Insight:
+
+- The Perception of Corruption in the United States has consistently been high over the past years, and the trend appears stagnant.
+- Australia and Canada exhibit relatively similar trends, fluctuating around the average point.
+- New Zealand has the lowest Perception of Corruption among the other countries.
+
+
+**4. Freedom.To.Make.Life.Choices**
+
+```{r}
+# Freedom.To.Make.Life.Choices
+coplot(Freedom.To.Make.Life.Choices ~ Year|Country.Name,
+       type = "b", 
+       data= balanced2,
+       rows = 1,
+       col = "blue")
+```
+Insight:
+
+- Overall, there was a significant drop in the Freedom To Make Life Choices in most countries in 2021, with the highest drop observed in the United States.
+- The declining trend of Freedom To Make Life Choices in the United States is notably significant compared to other countries.
+- The level of Freedom To Make Life Choices is relatively similar and quite high in Australia, Canada, and New Zealand, contrasting with the situation in the United States.
+
+
+## Heterogeneity in Life Ladder
+
+To observe heterogeneity among individuals and over time, we can use the `plotmeans()` function from the `gplots` package with the following parameters:
+
+- formula: Target ~ individual/time index variable
+- data: data frame
+
+**1. Heterogeneity among countries**
+
+```{r}
+plotmeans( Life.Ladder ~ Country.Name, data = balanced2, main="Heterogeneity among countries")
+```
+
+  
+**2. Heterogenitas antar Waktu**
+
+```{r}
+plotmeans(Life.Ladder ~ Year, data = balanced2, main="Heterogeneity among years")
+```
+Insight : 
+
+Based on the visual results above, it appears that the data among countries is quite heterogeneous.
+
+
+# Modeling
+
+## Cross-Validation
+
+The data will be divided into training and testing datasets. Since panel data contains time information, the data splitting should not be random but sequential.
+
+- The training data will use older data.
+- The testing data will use newer data.
+
+To achieve this, we can use the `filter()` function.
+
+```{r}
+# Create data train
+ladder_train <- balanced2 %>% filter(Year != 2022)
+  
+# Create data test
+ladder_test <- balanced2 %>% filter(Year == 2022)
+```
+
+After performing cross-validation, we need to ensure that the training data is balanced by conducting balancing. In this step, we will drop the time information that was used for the testing dataset, and then we will conduct balancing.
+
+```{r}
+# Drop the time information & balancing
+ladder_train <- ladder_train %>% 
+  droplevels() %>%     
+  make.pbalanced()    
+
+# check the data train 
+is.pbalanced(ladder_train)
+```
+
+## Multicollinearity Assumption Checking
+
+Due to the correlation analysis results in the previous EDA stage indicating multicollinearity among predictor variables, we will first check the assumption of multicollinearity by creating a regression model using the `lm()` function and then testing using the `vif()` function.
+
+- **VIF value > 10**: indicates multicollinearity in the model
+- **VIF value < 10**: indicates no multicollinearity in the model
+
+```{r}
+# your code here
+lm(Life.Ladder ~.-Country.Name -Year, ladder_train) %>% 
+  vif()
+```
+
+Insight: 
+
+- The table above indicates that the `Perceptions.Of.Corruption` variable has a VIF value greater than 10. Therefore, we will not use this column in our analysis.
+- In the correlation chart above, it is indicated that there is evidence of multicollinearity between `Log.GDP.Per.Capita` and `Perception.Of.Corruption`. However, since the `Perception.Of.Corruption` variable is dropped, we can use `Log.GDP.Per.Capita`.
+
+## Model Estimation
+
+### Model Creation
+
+For each model creation, we will use the `plm()` function from the `plm` package with the following parameters:
+
+- `formula`: Target ~ Predictors
+- `data`: dataframe
+- `index`: c("individual column","time column")
+- `model`:
+  + `"pooling"`: for Pooled OLS model
+  + `"within"`: for Fixed Effects model
+  + `"random"`: for Random Effects model
+
+where
+
+- Target variable: Life Ladder
+- Predictor variables (which has the strong positive/negative relationship with Life.Ladder as mentioned in correlation chart above)
+  + Log.GDP.Per.Capita
+  + Social.Support
+  + Freedom.To.Make.Life.Choices
+  + Positive.Affect
+  + Generosity
+
+**Combined Effects Model (CEM)**
+
+Creating a Common Effects Model and storing it in the `cem` object. 
+
+```{r}
+
+cem <- plm(Life.Ladder ~ Log.GDP.Per.Capita
+  + Social.Support
+  + Freedom.To.Make.Life.Choices
+  + Positive.Affect
+  + Generosity,
+           data = ladder_train,
+           index = c("Country.Name", "Year"),
+           model = "pooling")
+```
+
+**Fixed Effect Model (FEM)**
+
+```{r}
+fem <- plm(Life.Ladder ~  Log.GDP.Per.Capita
+  + Social.Support
+  + Freedom.To.Make.Life.Choices
+  + Positive.Affect
+  + Generosity,
+           data = ladder_train,
+           index = c("Country.Name","Year"),
+           model = "within")
+
+```
+
+**Chow Test**
+
+The Chow test is conducted to select the best model between the Combined Effects Model (CEM) and the Fixed Effects Model (FEM). To perform the Chow test, we can use the `pooltest()` function.
+
+The hypotheses:
+
+- H0: Combined Effects Model
+- H1: Fixed Effects Model
+
+**H0 is rejected if P-value < α. The significance level α used is 5%.**
+
+```{r}
+pooltest(cem,fem)
+```
+ 
+Insight :
+
+Based on the results of the Chow test above, we obtained a **p-value < α**. This means that the best model to use is the Fixed Effects Model.
+
+
+**Random Effects Model (REM)**
+
+Creating a Random Effects Model and storing it in the rem object. However, since the number of predictors exceeds the number of individual variables, we cannot use the random effect model effectively. Thus, we will continue to perform the assumption testing. 
+
+```{r}
+
+#rem <- plm(Life.Ladder ~  Log.GDP.Per.Capita
+#  + Social.Support
+#  + Freedom.To.Make.Life.Choices
+# + Positive.Affect,
+#           data = ladder_train,
+#           index = c("Country.Name","Year"),
+#           model = "random")
+
+```
+
+
+## Assumption Testing
+
+**Normality**
+
+The hypotheses tested are as follows:
+
+- H0: Residuals are normally distributed
+- H1: Residuals are not normally distributed
+
+H0 is rejected if P-value < α. The significance level α used is 5%.
+
+```{r}
+# your code here
+fem$residuals %>% shapiro.test()
+```
+
+Insight : 
+
+Based on the normality assumption test results, we obtained a **p-value > 0.05**, indicating that the residuals are normally distributed.
+
+**Homogeneity**
+
+The hypotheses tested are as follows:
+
+- H0: Residuals have homoscedasticity
+- H1: Residuals do not have homoscedasticity
+
+H0 is rejected if P-value < α. The significance level α used is 5%.
+
+```{r}
+fem %>% bptest()
+
+```
+
+Insight : 
+
+Based on the homogeneity assumption test results, we obtained a **p-value < 0.05**. However, the p-value is relatively close to 0.05. 
+
+**Autocorrelation**
+
+The hypotheses tested are as follows:
+
+- H0: There is no autocorrelation in the residuals
+- H1: There is autocorrelation in the residuals
+
+H0 is rejected if P-value < α. The significance level α used is 5%.
+
+```{r}
+
+fem$residuals %>% Box.test(type = "Ljung-Box")
+```
+
+Insight : 
+
+Based on the autocorrelation assumption test results, we obtained a **p-value < 0.05**, indicating that there is autocorrelation among the residuals.
+
+## Model Interpretation
+
+**Coefficients**
+
+```{r}
+summary(fem)
+```
+
+$$life.ladder = -0.15517 * Log.GDP.Per.Capita  +  3.71697 * Social.Support + 0.38583 *Freedom.To.Make.Life.Choices + 2.39006 * Positive.Affect + 0.42221*Generosity$$
+
+- The variables that significantly influence the happiness level in the North  America and ANZ region are `Social.Support` and `Positive.Affect`.
+- Among these variables, the `Social.Support` has the most significant impact.
+- The happiness level of a country in North America and ANZ will decrease by -0.15517 units for each one-unit increase in `Log.GDP.Per.Capita`, holding all other variables constant.
+- The happiness level of a country in  North America and ANZ will increase by 3.71697 units for each one-unit increase in `Social.Support`, holding all other variables constant.
+- The happiness level of a country in North America and ANZ will increase by 0.38583 units for each one-unit increase in `Freedom.To.Make.Life.Choices`, holding all other variables constant.
+- The happiness level of a country in  North America and ANZ will increase by 2.39006 units for each one-unit increase in `Positive.Affect`, holding all other variables constant.
+- The happiness level of a country in  North America and ANZ will increase by 0.42221  units for each one-unit increase in `Generosity`, holding all other variables constant.
+
+
+## Prediction & Evaluation
+
+To make predictions, we will use the `predict()` function with the following parameters:
+
+- object: the name of the model we are using
+- newdata: the new data we want to predict
+
+```{r}
+# your code here
+pred <- predict(fem, ladder_test, na.fill=F)
+```
+
+To test whether the model we have is good at predicting new data, we will evaluate it using error values, and one commonly used error metric is MAPE (Mean Absolute Percentage Error). We can do this using the `MAPE()` function with the following parameters:
+
+- y_pred: predicted values
+- y_true: actual target values
+
+```{r}
+# your code here
+MAPE(y_pred = pred, 
+     y_true =ladder_test$Life.Ladder)
+```
+
+Insight:
+
+The prediction error rate of the REM model in predicting new values is 1.8%, indicating that the model can be used to predict new data accurately.
+
+# Conclusion and Suggestions
+
+**Conclusion:**
+
+
+- The highest level of happiness in the North America and ANZ region was observed in Canada in 2010, while the lowest was recorded in the United States in 2022.
+- Significant variables influencing happiness in the region include Social Support and Positive Affect, with Social Support exerting a greater influence.
+- Despite a violation of the homogeneity assumption in the testing, we accept the model due to the p-value's proximity to the significance level. However, dataset transformation could enhance the model's performance.
+- The final model indicates that individual indices influence happiness, suggesting that each country has different characteristics regarding its population's happiness levels.
+- There appears to be no time effect on the happiness level in the North America and ANZ region.
+- Based on the prediction error rate, it suggests that the model can be utilized to predict a new dataset.
+
+**Suggestions:**
+
+To improve happiness levels in the North America and ANZ region, consider the following:
+
+- For Positive Affect:
+  - Encourage volunteerism to enhance social support and fulfillment, leading to greater positive affect.
+  - Implement education and skill-building programs to improve skills and emotional intelligence, thus promoting positive affect.
+- For Social Support:
+  - Launch mental health awareness campaigns to mitigate stigma and facilitate access to resources and support services.
+
+
+
+# Reference
+
+1. Dataset: [World Happiness Report 2023](https://www.kaggle.com/datasets/usamabuttar/world-happiness-report-2005-present)
+
+2. Workflow : [Algoritma](Inclass-final_data panel in R)
+
